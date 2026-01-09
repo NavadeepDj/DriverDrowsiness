@@ -97,3 +97,8 @@ PERCLOS_LEVEL1_MAX = 40.0  # Maximum PERCLOS for Level 1 trigger (≤40%, above 
 LEVEL1_FREQUENCY_WINDOW_SECONDS = 300  # 5 minutes rolling window to track Level 1 frequency
 LEVEL1_FREQUENCY_THRESHOLD = 3  # If ≥3 Level 1 alerts occur within the window, escalate to Level 2
 
+# Head Pose Thresholds (for attentiveness detection)
+# These determine when the driver is considered "looking at road/camera"
+YAW_THRESHOLD = 50.0  # Maximum absolute yaw angle (degrees) to be considered attentive
+PITCH_THRESHOLD = 30.0  # Maximum absolute pitch angle (degrees) to be considered attentive
+

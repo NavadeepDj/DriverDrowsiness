@@ -1,0 +1,15 @@
+{"type": "LEVEL1", "timestamp": 1767972591662, "datetime": "2026-01-09T20:59:51.685900", "severity": "warning"}
+{"type": "LEVEL1", "timestamp": 1767972600668, "datetime": "2026-01-09T21:00:00.697223", "severity": "warning"}
+{"type": "LEVEL1", "timestamp": 1767972677522, "datetime": "2026-01-09T21:01:17.542365", "severity": "warning"}
+{"type": "LEVEL2", "timestamp": 1767972687537, "datetime": "2026-01-09T21:01:28.065544", "severity": "emergency"}
+{"type": "EMERGENCY", "timestamp": 1767972687537, "datetime": "2026-01-09T21:01:28.066563", "severity": "critical", "status": "active"}
+{"type": "LEVEL1", "timestamp": 1767972688160, "datetime": "2026-01-09T21:01:28.177231", "severity": "warning"}
+{"type": "LEVEL1", "timestamp": 1767972802762, "datetime": "2026-01-09T21:03:22.793207", "severity": "warning", "reason": "microsleep event", "microsleep_count": 1, "microsleep_threshold_seconds": 0.48, "critical": true}
+{"type": "LEVEL1", "timestamp": 1767972811658, "datetime": "2026-01-09T21:03:31.685881", "severity": "warning", "reason": "microsleep event", "microsleep_count": 1, "microsleep_threshold_seconds": 0.48, "critical": true}
+{"type": "LEVEL1", "timestamp": 1767972858598, "datetime": "2026-01-09T21:04:18.707004", "severity": "warning", "reason": "microsleep event", "microsleep_count": 1, "microsleep_threshold_seconds": 0.48, "critical": true}
+{"type": "LEVEL2", "timestamp": 1767972866664, "datetime": "2026-01-09T21:04:27.186909", "severity": "emergency", "reason": "frequent Level 1 alerts", "level1_alert_count": 3, "window_minutes": 5.0, "threshold": 3}
+{"type": "EMERGENCY", "timestamp": 1767972866664, "datetime": "2026-01-09T21:04:27.188719", "severity": "critical", "status": "active"}
+{"type": "LEVEL1", "timestamp": 1767972867318, "datetime": "2026-01-09T21:04:27.341875", "severity": "warning", "reason": "microsleep event", "microsleep_count": 1, "microsleep_threshold_seconds": 0.48, "critical": true}
+{"type": "LEVEL2", "timestamp": 1767972867352, "datetime": "2026-01-09T21:04:27.888748", "severity": "emergency", "reason": "frequent Level 1 alerts", "level1_alert_count": 4, "window_minutes": 5.0, "threshold": 3}
+{"type": "EMERGENCY", "timestamp": 1767972867352, "datetime": "2026-01-09T21:04:27.889758", "severity": "critical", "status": "active"}
+{"type": "LEVEL1", "timestamp": 1767972875792, "datetime": "2026-01-09T21:04:35.820835", "severity": "warning", "reason": "microsleep event", "microsleep_count": 2, "microsleep_threshold_seconds": 0.48, "critical": true}

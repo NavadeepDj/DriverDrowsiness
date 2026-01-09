@@ -29,6 +29,7 @@ from head_pose_estimator import HeadPoseEstimator
 from score_calculator import ScoreCalculator
 from visualizer import draw_overlay
 from alerter import AlertEngine
+from cloud_sync import CloudSync
 
 
 def main():
@@ -55,12 +56,22 @@ def main():
     head_pose = HeadPoseEstimator()
     score_calculator = ScoreCalculator()
     alerter = AlertEngine()  # Two-level alert system
+    cloud_sync = CloudSync()  # Local logging (offline mode)
     
-    
+    # Session tracking for logging
     frame_count = 0
     start_time = time.time()
+    session_start_time = start_time
     consecutive_failures = 0
     last_warning_time = 0
+    
+    # Track session metrics for summary
+    session_scores = []
+    max_score = 0.0
+    alert_count = 0
+    prev_alert_level = 0
+    last_state_log_time = 0
+    state_log_interval = 5.0  # Log driver state every 5 seconds
     
     try:
         while True:
@@ -200,6 +211,37 @@ def main():
             level1_elapsed = alerter.get_level1_elapsed(now)
             yawn_frequency = alerter.get_yawn_frequency(now) if face_landmarks else 0.0
             
+            # Track session metrics
+            if ear is not None:
+                session_scores.append(score)
+                if score > max_score:
+                    max_score = score
+            
+            # Log alert events when alert level changes
+            if alert_level != prev_alert_level:
+                # Get alert reason and details from alerter
+                alert_reason, alert_details = alerter.get_last_alert_info()
+                
+                if alert_level == 1 and prev_alert_level == 0:
+                    # Level 1 alert triggered
+                    cloud_sync.log_alert("LEVEL1", now, reason=alert_reason, details=alert_details)
+                    alert_count += 1
+                elif alert_level == 2:
+                    # Level 2 alert triggered
+                    cloud_sync.log_alert("LEVEL2", now, reason=alert_reason, details=alert_details)
+                    cloud_sync.send_emergency(now)
+                    if prev_alert_level < 2:
+                        alert_count += 1
+                prev_alert_level = alert_level
+            
+            # Log driver state periodically
+            if now - last_state_log_time >= state_log_interval:
+                if ear is not None:
+                    cloud_sync.update_driver_state(
+                        state, score, ear, perclos, blink_rate, alert_level
+                    )
+                last_state_log_time = now
+            
             # Get LAR for display
             lar_display = lar if face_landmarks and lar is not None else (
                 yawn_detector.get_current_lar() if face_landmarks else None
@@ -244,9 +286,22 @@ def main():
                 print("Alerts manually reset")
     
     finally:
+        # Calculate session summary
+        session_duration = time.time() - session_start_time
+        avg_score = sum(session_scores) / len(session_scores) if session_scores else 0.0
+        
+        # Log session summary
+        cloud_sync.log_session_summary(
+            avg_score=avg_score,
+            max_score=max_score,
+            alert_count=alert_count,
+            duration=session_duration
+        )
+        
         cap.release()
         cv2.destroyAllWindows()
         print("Shutdown complete.")
+        print(f"Session Summary: Duration={session_duration:.1f}s, Avg Score={avg_score:.1f}, Max Score={max_score:.1f}, Alerts={alert_count}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import math
 from collections import deque
+from config import YAW_THRESHOLD, PITCH_THRESHOLD
 
 
 def rotation_matrix_to_euler_angles(R):
@@ -141,7 +142,7 @@ class HeadPoseEstimator:
         # Determine if driver is looking at road/camera
         yaw_abs = abs(yaw_s)
         pitch_mod = min(abs(pitch_s), abs(abs(pitch_s) - 180.0))
-        looking = yaw_abs < 20.0 and pitch_mod < 15.0
+        looking = yaw_abs < YAW_THRESHOLD and pitch_mod < PITCH_THRESHOLD
         
         return yaw_s, pitch_s, roll_s, looking
 

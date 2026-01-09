@@ -1,0 +1,4 @@
+{"avg_drowsiness_score": 58.81, "max_drowsiness_score": 100.0, "alert_count": 2, "duration_seconds": 14.831860780715942, "timestamp": 1767972602592, "datetime": "2026-01-09T21:00:02.592257"}
+{"avg_drowsiness_score": 24.63, "max_drowsiness_score": 80.0, "alert_count": 3, "duration_seconds": 47.32689881324768, "timestamp": 1767972717871, "datetime": "2026-01-09T21:01:57.871422"}
+{"avg_drowsiness_score": 37.47, "max_drowsiness_score": 100.0, "alert_count": 7, "duration_seconds": 144.55249500274658, "timestamp": 1767972939284, "datetime": "2026-01-09T21:05:39.284076"}
+{"avg_drowsiness_score": 0.0, "max_drowsiness_score": 0.0, "alert_count": 0, "duration_seconds": 0.571613073348999, "timestamp": 1767972954354, "datetime": "2026-01-09T21:05:54.354801"}

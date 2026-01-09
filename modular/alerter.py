@@ -92,6 +92,10 @@ class AlertEngine:
         # Level 1 frequency tracking (for repeated alert pattern detection)
         self.level1_trigger_history = []  # List of timestamps when Level 1 was triggered
         
+        # Store last alert details for logging
+        self.last_alert_reason = None
+        self.last_alert_details = None
+        
         # Initialize pygame mixer for audio alerts
         self.audio_enabled = False
         if pygame_available:
@@ -416,23 +420,47 @@ class AlertEngine:
         # Track Level 1 trigger for frequency analysis
         self.level1_trigger_history.append(timestamp)
         
+        # Store alert details for logging
+        self.last_alert_reason = reason
+        self.last_alert_details = {}
+        
         print(f"[LEVEL 1 ALERT] Triggered at {timestamp:.2f}s - Reason: {reason}")
         
         if reason == "yawn frequency":
             yawn_freq = self.get_yawn_frequency(timestamp)
             print(f"  → Yawn Frequency: {yawn_freq:.1f} yawns in last 30s")
             print(f"  → Threshold: >{YAWN_ALERT_THRESHOLD} yawns/30s indicates unusual/drowsy behavior")
+            self.last_alert_details = {
+                'yawn_frequency': round(yawn_freq, 1),
+                'threshold': YAWN_ALERT_THRESHOLD
+            }
         elif reason == "excessive blink rate":
             print(f"  → Blink Rate: {blink_rate:.1f} blinks/min (≥{BLINK_RATE_LEVEL1_THRESHOLD} = excessive)")
             print(f"  → Research: High blink rate indicates fatigue/drowsiness")
+            self.last_alert_details = {
+                'blink_rate': round(blink_rate, 1) if blink_rate else None,
+                'threshold': BLINK_RATE_LEVEL1_THRESHOLD
+            }
         elif reason == "high PERCLOS":
             print(f"  → PERCLOS: {perclos:.1f}% ({PERCLOS_LEVEL1_MIN}-{PERCLOS_LEVEL1_MAX}% range)")
             print(f"  → Research: PERCLOS 15-40% indicates drowsiness")
+            self.last_alert_details = {
+                'perclos': round(perclos, 1) if perclos else None,
+                'perclos_range': f"{PERCLOS_LEVEL1_MIN}-{PERCLOS_LEVEL1_MAX}%"
+            }
         elif reason == "microsleep event":
             print(f"  → Microsleep: {microsleep_count} event(s) detected (eyes closed ≥0.48s)")
             print(f"  → CRITICAL: Microsleep is dangerous - immediate alert")
+            self.last_alert_details = {
+                'microsleep_count': microsleep_count,
+                'microsleep_threshold_seconds': 0.48,
+                'critical': True
+            }
         else:
             print("  → Symptoms: Eye closure, high PERCLOS, excessive blinking, yawning, or inattention")
+            self.last_alert_details = {
+                'symptoms': 'multiple'
+            }
         
         # Start audio/visual alerts
         self.start_level1_alerts()
@@ -450,17 +478,36 @@ class AlertEngine:
         
         self.level2_active = True
         self.level2_triggered = True
+        
+        # Store alert details for logging
+        self.last_alert_reason = reason
+        self.last_alert_details = {}
+        
         print(f"[LEVEL 2 EMERGENCY] Emergency alert at {timestamp:.2f}s - Reason: {reason}")
         
         if reason == "frequent Level 1 alerts":
             # Count recent Level 1 triggers
             cutoff_time = timestamp - LEVEL1_FREQUENCY_WINDOW_SECONDS
             recent_triggers = [ts for ts in self.level1_trigger_history if ts >= cutoff_time]
-            print(f"  → Level 1 alerts triggered {len(recent_triggers)} times in last {LEVEL1_FREQUENCY_WINDOW_SECONDS/60:.1f} minutes")
+            alert_count = len(recent_triggers)
+            window_minutes = round(LEVEL1_FREQUENCY_WINDOW_SECONDS / 60, 1)
+            
+            print(f"  → Level 1 alerts triggered {alert_count} times in last {window_minutes} minutes")
             print(f"  → Threshold: ≥{LEVEL1_FREQUENCY_THRESHOLD} alerts indicates persistent fatigue")
             print("  → Driver repeatedly becoming drowsy - Immediate attention required!")
+            
+            self.last_alert_details = {
+                'level1_alert_count': alert_count,
+                'window_minutes': window_minutes,
+                'threshold': LEVEL1_FREQUENCY_THRESHOLD,
+                'message': f'Level 1 alerts triggered {alert_count} times in last {window_minutes} minutes. Threshold: ≥{LEVEL1_FREQUENCY_THRESHOLD} alerts indicates persistent fatigue. Driver repeatedly becoming drowsy - Immediate attention required!'
+            }
         else:
             print("  → Driver unresponsive to Level 1 warnings - Immediate attention required!")
+            self.last_alert_details = {
+                'symptoms': 'persistent',
+                'message': 'Driver unresponsive to Level 1 warnings - Immediate attention required!'
+            }
         
         # Start emergency alerts
         self.start_level2_alerts()
@@ -553,4 +600,13 @@ class AlertEngine:
         if self.level1_triggered_at is not None:
             return max(0.0, current_time - self.level1_triggered_at)
         return 0.0
+    
+    def get_last_alert_info(self):
+        """
+        Get the last alert reason and details for logging.
+        
+        Returns:
+            Tuple of (reason, details_dict) or (None, None) if no alert info available
+        """
+        return self.last_alert_reason, self.last_alert_details
 
