@@ -22,7 +22,14 @@ from config import (
     LEVEL2_DURATION_SECONDS,
     YAWN_ALERT_WINDOW_SECONDS,
     YAWN_ALERT_THRESHOLD,
-    YAWN_RECENT_WINDOW_SECONDS
+    YAWN_RECENT_WINDOW_SECONDS,
+    BLINK_RATE_LEVEL1_THRESHOLD,
+    MICROSLEEP_LEVEL1_TRIGGER,
+    PERCLOS_LEVEL1_MIN,
+    PERCLOS_LEVEL1_MAX,
+    LEVEL1_FREQUENCY_WINDOW_SECONDS,
+    LEVEL1_FREQUENCY_THRESHOLD,
+    EAR_CLOSED_THRESHOLD
 )
 
 
@@ -82,6 +89,9 @@ class AlertEngine:
         self.yawn_timestamps = []  # List of yawn timestamps for alert tracking
         self.yawns_since_level1 = 0  # Count of yawns since Level 1 was triggered
         
+        # Level 1 frequency tracking (for repeated alert pattern detection)
+        self.level1_trigger_history = []  # List of timestamps when Level 1 was triggered
+        
         # Initialize pygame mixer for audio alerts
         self.audio_enabled = False
         if pygame_available:
@@ -97,14 +107,19 @@ class AlertEngine:
         self.alert_thread = None
         self.stop_alert = False
     
-    def process(self, state, timestamp, yawn_timestamps=None):
+    def process(self, state, timestamp, yawn_timestamps=None, 
+                perclos=None, blink_rate=None, microsleep_count=0, ear=None):
         """
-        Process driver state and yawn timestamps, trigger appropriate alerts based on symptoms.
+        Process driver state and metrics, trigger appropriate alerts based on symptoms.
         
         Args:
             state: Current driver state string (ALERT, SLIGHTLY_DROWSY, DROWSY, etc.)
             timestamp: Current timestamp in seconds
             yawn_timestamps: List of recent yawn timestamps (optional, for yawn-based alerts)
+            perclos: Current PERCLOS percentage (optional, for PERCLOS-based alerts)
+            blink_rate: Current blink rate in blinks/min (optional, for blink rate alerts)
+            microsleep_count: Number of microsleep events (optional, for microsleep alerts)
+            ear: Current EAR value (optional, for EAR-based Level 2 escalation)
         """
         # Update yawn timestamps if provided
         if yawn_timestamps is not None:
@@ -119,11 +134,24 @@ class AlertEngine:
         # Check if state indicates drowsiness symptoms
         has_drowsiness_symptoms = state in self.DROWSY_STATES
         
-        # Check yawn-based trigger (independent of state)
+        # Check all independent symptom triggers
         yawn_trigger = self._check_yawn_trigger(timestamp)
+        blink_rate_trigger = self._check_blink_rate_trigger(blink_rate)
+        microsleep_trigger = self._check_microsleep_trigger(microsleep_count)
+        perclos_trigger = self._check_perclos_trigger(perclos)
         
-        # Level 1 can be triggered by either state-based symptoms OR yawn frequency
-        should_trigger_level1 = has_drowsiness_symptoms or yawn_trigger
+        # Microsleep triggers immediately (no 3-second delay) - most dangerous
+        if microsleep_trigger and not self.level1_active:
+            self.trigger_level1(timestamp, "microsleep event", microsleep_count=microsleep_count)
+            return  # Exit early for immediate microsleep alert
+        
+        # Level 1 can be triggered by ANY symptom scenario
+        should_trigger_level1 = (
+            has_drowsiness_symptoms or 
+            yawn_trigger or 
+            blink_rate_trigger or 
+            perclos_trigger
+        )
         
         if should_trigger_level1:
             # Start tracking Level 1 alert duration
@@ -134,61 +162,87 @@ class AlertEngine:
             
             # Trigger Level 1 after duration threshold
             if elapsed >= LEVEL1_DURATION_SECONDS and not self.level1_active:
-                if yawn_trigger and not has_drowsiness_symptoms:
-                    trigger_reason = "yawn frequency"
-                elif yawn_trigger and has_drowsiness_symptoms:
-                    trigger_reason = "drowsiness symptoms + yawn frequency"
-                else:
-                    trigger_reason = "drowsiness symptoms"
-                self.trigger_level1(timestamp, trigger_reason)
+                # Determine trigger reason(s)
+                triggers = []
+                if yawn_trigger:
+                    triggers.append("yawn frequency")
+                if blink_rate_trigger:
+                    triggers.append("excessive blink rate")
+                if perclos_trigger:
+                    triggers.append("high PERCLOS")
+                if has_drowsiness_symptoms:
+                    triggers.append("drowsiness symptoms")
+                
+                trigger_reason = " + ".join(triggers) if triggers else "drowsiness symptoms"
+                self.trigger_level1(timestamp, trigger_reason, 
+                                   perclos=perclos, blink_rate=blink_rate)
             
-            # Check if Level 1 should be reset (state is ALERT and no new yawns)
-            # This prevents Level 1 from staying active when only old yawns are in the window
+            # Check if Level 1 should be reset (state is ALERT and no symptom triggers active)
             if self.level1_active and self.level1_triggered_at is not None:
-                # If state is ALERT and no new yawns occurred after Level 1, reset immediately
-                if not has_drowsiness_symptoms and self.yawns_since_level1 == 0:
+                # If state is ALERT and no symptom triggers active, reset immediately
+                if (not has_drowsiness_symptoms and 
+                    not yawn_trigger and 
+                    not blink_rate_trigger and 
+                    not perclos_trigger and
+                    self.yawns_since_level1 == 0):
                     # Check if enough time has passed since Level 1 (at least 5 seconds)
                     level1_elapsed = timestamp - self.level1_triggered_at
                     if level1_elapsed >= 5.0:  # Give a small buffer before reset
-                        # State is ALERT and no new yawns → reset Level 1
+                        # All symptoms cleared → reset Level 1
                         self.reset()
                         return  # Exit early, don't check for Level 2
             
-            # Trigger Level 2 ONLY if Level 1 persists AND trigger condition is STILL active
-            # This prevents escalation if yawn frequency drops or symptoms clear
+            # Check for frequent Level 1 alerts (repeated drowsiness pattern)
+            # This detects if driver repeatedly becomes drowsy and recovers
+            # This check works even when Level 1 is not currently active
+            frequent_level1_trigger = self._check_frequent_level1_trigger(timestamp)
+            
+            # Check for frequent Level 1 pattern (immediate escalation, even if Level 1 not active)
+            if frequent_level1_trigger and not self.level2_active:
+                self.trigger_level2(timestamp, reason="frequent Level 1 alerts")
+            
+            # Trigger Level 2 if Level 1 persists AND trigger condition is STILL active
             if self.level1_active and self.level1_triggered_at is not None:
                 level1_elapsed = timestamp - self.level1_triggered_at
+                
+                # Check for persistent symptoms (standard escalation)
                 if level1_elapsed >= LEVEL2_DURATION_SECONDS and not self.level2_active:
-                    # Only escalate if:
-                    # 1. Drowsiness symptoms still present, OR
-                    # 2. Yawn frequency still high AND yawns CONTINUED after Level 1 (not just old ones)
+                    # Only escalate if symptoms still present
                     should_escalate = False
                     if has_drowsiness_symptoms:
                         # State-based symptoms persist → escalate
                         should_escalate = True
                     elif yawn_trigger:
-                        # Yawn frequency is still high - check if yawns continued after Level 1
-                        # CRITICAL: Must have yawns AFTER Level 1 was triggered (not just old ones)
+                        # Yawn frequency still high - check if yawns continued after Level 1
+                        # AND (PERCLOS issues OR EAR issues)
                         if self.yawns_since_level1 > 0:
-                            # New yawns occurred after Level 1 → escalate
-                            should_escalate = True
-                        # If no yawns since Level 1, don't escalate (old yawns in window don't count)
+                            # Check for PERCLOS or EAR issues
+                            has_perclos_issue = perclos is not None and perclos >= PERCLOS_LEVEL1_MIN
+                            has_ear_issue = ear is not None and ear < EAR_CLOSED_THRESHOLD
+                            
+                            if has_perclos_issue or has_ear_issue:
+                                should_escalate = True
+                    elif blink_rate_trigger:
+                        # Excessive blink rate persists → escalate
+                        should_escalate = True
+                    elif perclos_trigger:
+                        # High PERCLOS persists → escalate
+                        should_escalate = True
                     
                     if should_escalate:
                         self.trigger_level2(timestamp)
         else:
-            # Reset if symptoms clear (driver becomes alert) AND no yawn trigger
-            # This handles the case where yawn frequency drops below threshold
+            # Reset if all symptoms clear (driver becomes alert) AND no symptom triggers
             if state == "ALERT" or state == "NO_FACE":
-                # Reset if yawn frequency also dropped below threshold
-                if not yawn_trigger:
+                # Reset if all symptom triggers dropped
+                if not yawn_trigger and not blink_rate_trigger and not perclos_trigger:
                     self.reset()
-            elif not yawn_trigger:
-                # If yawn frequency dropped but state is still drowsy, 
+            elif not yawn_trigger and not blink_rate_trigger and not perclos_trigger:
+                # If symptom triggers dropped but state is still drowsy, 
                 # reset Level 1 but keep monitoring state-based symptoms
                 if self.level1_active and self.level1_triggered_at is not None:
-                    # Check if Level 1 was triggered by yawn frequency only
-                    # If so, reset it since yawn frequency dropped
+                    # Check if Level 1 was triggered by symptom triggers only
+                    # If so, reset it since symptoms cleared
                     if not has_drowsiness_symptoms:
                         self.reset()
     
@@ -196,12 +250,9 @@ class AlertEngine:
         """
         Check if yawn frequency triggers Level 1 alert.
         
-        Research-backed thresholds:
-        - ≥ 2 yawns/min → Unusual (Moderate risk) → Level 1 Alert
-        - ≥ 3 yawns/min → Strong drowsiness indicator (High risk) → Level 1 Alert
-        - ≥ 4 yawns/min → Critical/Unsafe → Level 1 Alert
+        Threshold: >2 yawns in 30 seconds → Level 1 Alert
         
-        Uses rolling 1-minute window for yawn frequency calculation.
+        Uses rolling 30-second window for yawn frequency calculation.
         
         Args:
             timestamp: Current timestamp
@@ -209,22 +260,99 @@ class AlertEngine:
         Returns:
             True if yawn frequency should trigger Level 1, False otherwise
         """
-        # Clean old yawns outside the tracking window (keep 1 minute)
+        # Clean old yawns outside the tracking window (keep 30 seconds)
         cutoff_time = timestamp - YAWN_ALERT_WINDOW_SECONDS
         self.yawn_timestamps = [ts for ts in self.yawn_timestamps if ts >= cutoff_time]
         
-        # Count yawns in the last 1 minute (rolling window)
+        # Count yawns in the last 30 seconds (rolling window)
         window_start = timestamp - YAWN_ALERT_WINDOW_SECONDS
         yawns_in_window = sum(1 for ts in self.yawn_timestamps if ts >= window_start)
         
-        # Calculate yawns per minute
-        yawns_per_minute = yawns_in_window  # Since window is 60 seconds
-        
-        # Trigger Level 1 if ≥ threshold yawns per minute
-        if yawns_per_minute >= YAWN_ALERT_THRESHOLD:
+        # Trigger Level 1 if > threshold yawns in 30 seconds (>2 yawns/30s)
+        if yawns_in_window > YAWN_ALERT_THRESHOLD:
             return True
         
         return False
+    
+    def _check_blink_rate_trigger(self, blink_rate):
+        """
+        Check if excessive blink rate triggers Level 1 alert.
+        
+        Research-backed threshold:
+        - ≥ 30 blinks/min → Excessive (indicates fatigue/drowsiness) → Level 1 Alert
+        
+        Args:
+            blink_rate: Current blink rate (blinks per minute)
+            
+        Returns:
+            True if blink rate should trigger Level 1, False otherwise
+        """
+        if blink_rate is None:
+            return False
+        
+        return blink_rate >= BLINK_RATE_LEVEL1_THRESHOLD
+    
+    def _check_microsleep_trigger(self, microsleep_count):
+        """
+        Check if microsleep event triggers Level 1 alert.
+        
+        Microsleep is a dangerous symptom - triggers immediately (no delay).
+        
+        Args:
+            microsleep_count: Number of microsleep events in window
+            
+        Returns:
+            True if microsleep detected, False otherwise
+        """
+        if microsleep_count is None:
+            return False
+        
+        return MICROSLEEP_LEVEL1_TRIGGER and microsleep_count > 0
+    
+    def _check_perclos_trigger(self, perclos):
+        """
+        Check if PERCLOS triggers Level 1 alert (independent of state).
+        
+        Research-backed threshold:
+        - 15% ≤ PERCLOS ≤ 40% → Level 1 Alert (independent trigger)
+        - PERCLOS > 40% → Handled by state-based classification
+        
+        Args:
+            perclos: Current PERCLOS percentage (0-100)
+            
+        Returns:
+            True if PERCLOS should trigger Level 1, False otherwise
+        """
+        if perclos is None:
+            return False
+        
+        return PERCLOS_LEVEL1_MIN <= perclos <= PERCLOS_LEVEL1_MAX
+    
+    def _check_frequent_level1_trigger(self, timestamp):
+        """
+        Check if Level 1 alerts are occurring too frequently (repeated drowsiness pattern).
+        
+        This detects a pattern where the driver repeatedly becomes drowsy, triggers Level 1,
+        recovers, but then becomes drowsy again. This indicates persistent fatigue.
+        
+        Args:
+            timestamp: Current timestamp
+            
+        Returns:
+            True if Level 1 alerts are too frequent, False otherwise
+        """
+        # Clean old Level 1 triggers outside the tracking window
+        cutoff_time = timestamp - LEVEL1_FREQUENCY_WINDOW_SECONDS
+        self.level1_trigger_history = [
+            ts for ts in self.level1_trigger_history if ts >= cutoff_time
+        ]
+        
+        # Count Level 1 triggers in the rolling window
+        window_start = timestamp - LEVEL1_FREQUENCY_WINDOW_SECONDS
+        level1_count = sum(1 for ts in self.level1_trigger_history if ts >= window_start)
+        
+        # Trigger Level 2 if threshold exceeded
+        return level1_count >= LEVEL1_FREQUENCY_THRESHOLD
     
     def _check_recent_yawns(self, timestamp):
         """
@@ -248,31 +376,35 @@ class AlertEngine:
     
     def get_yawn_frequency(self, timestamp):
         """
-        Get current yawn frequency (yawns per minute) in rolling 1-minute window.
+        Get current yawn frequency (yawns in 30-second window).
         
         Args:
             timestamp: Current timestamp
             
         Returns:
-            Yawns per minute (float)
+            Yawns in 30-second window (float)
         """
         # Clean old yawns
         cutoff_time = timestamp - YAWN_ALERT_WINDOW_SECONDS
         self.yawn_timestamps = [ts for ts in self.yawn_timestamps if ts >= cutoff_time]
         
-        # Count yawns in last minute
+        # Count yawns in last 30 seconds
         window_start = timestamp - YAWN_ALERT_WINDOW_SECONDS
         yawns_in_window = sum(1 for ts in self.yawn_timestamps if ts >= window_start)
         
-        return float(yawns_in_window)  # yawns per minute (window is 60 seconds)
+        return float(yawns_in_window)  # yawns in 30-second window
     
-    def trigger_level1(self, timestamp, reason="drowsiness symptoms"):
+    def trigger_level1(self, timestamp, reason="drowsiness symptoms", 
+                      perclos=None, blink_rate=None, microsleep_count=0):
         """
-        Trigger Level 1 alert (drowsiness symptoms or yawn pattern detected).
+        Trigger Level 1 alert (drowsiness symptoms or specific symptom detected).
         
         Args:
             timestamp: Timestamp when alert was triggered
-            reason: Reason for trigger ("drowsiness symptoms" or "yawn pattern")
+            reason: Reason for trigger (e.g., "yawn frequency", "excessive blink rate", "high PERCLOS", "microsleep event")
+            perclos: PERCLOS value (for display)
+            blink_rate: Blink rate value (for display)
+            microsleep_count: Microsleep count (for display)
         """
         if self.level1_active:
             return
@@ -280,32 +412,55 @@ class AlertEngine:
         self.level1_active = True
         self.level1_triggered_at = timestamp
         self.yawns_since_level1 = 0  # Reset counter when Level 1 triggers
+        
+        # Track Level 1 trigger for frequency analysis
+        self.level1_trigger_history.append(timestamp)
+        
         print(f"[LEVEL 1 ALERT] Triggered at {timestamp:.2f}s - Reason: {reason}")
+        
         if reason == "yawn frequency":
             yawn_freq = self.get_yawn_frequency(timestamp)
-            risk_level = "High" if yawn_freq >= 4 else ("Moderate" if yawn_freq >= 3 else "Moderate")
-            print(f"  → Yawn Frequency: {yawn_freq:.1f} yawns/min ({risk_level} risk)")
-            print(f"  → Research threshold: ≥{YAWN_ALERT_THRESHOLD} yawns/min indicates unusual/drowsy behavior")
+            print(f"  → Yawn Frequency: {yawn_freq:.1f} yawns in last 30s")
+            print(f"  → Threshold: >{YAWN_ALERT_THRESHOLD} yawns/30s indicates unusual/drowsy behavior")
+        elif reason == "excessive blink rate":
+            print(f"  → Blink Rate: {blink_rate:.1f} blinks/min (≥{BLINK_RATE_LEVEL1_THRESHOLD} = excessive)")
+            print(f"  → Research: High blink rate indicates fatigue/drowsiness")
+        elif reason == "high PERCLOS":
+            print(f"  → PERCLOS: {perclos:.1f}% ({PERCLOS_LEVEL1_MIN}-{PERCLOS_LEVEL1_MAX}% range)")
+            print(f"  → Research: PERCLOS 15-40% indicates drowsiness")
+        elif reason == "microsleep event":
+            print(f"  → Microsleep: {microsleep_count} event(s) detected (eyes closed ≥0.48s)")
+            print(f"  → CRITICAL: Microsleep is dangerous - immediate alert")
         else:
             print("  → Symptoms: Eye closure, high PERCLOS, excessive blinking, yawning, or inattention")
         
         # Start audio/visual alerts
         self.start_level1_alerts()
     
-    def trigger_level2(self, timestamp):
+    def trigger_level2(self, timestamp, reason="persistent symptoms"):
         """
-        Trigger Level 2 alert (emergency escalation - symptoms persist).
+        Trigger Level 2 alert (emergency escalation - symptoms persist or frequent alerts).
         
         Args:
             timestamp: Timestamp when alert was triggered
+            reason: Reason for escalation ("persistent symptoms" or "frequent Level 1 alerts")
         """
         if self.level2_active:
             return
         
         self.level2_active = True
         self.level2_triggered = True
-        print(f"[LEVEL 2 EMERGENCY] Drowsiness symptoms persist - Emergency alert at {timestamp:.2f}s")
-        print("  → Driver unresponsive to Level 1 warnings - Immediate attention required!")
+        print(f"[LEVEL 2 EMERGENCY] Emergency alert at {timestamp:.2f}s - Reason: {reason}")
+        
+        if reason == "frequent Level 1 alerts":
+            # Count recent Level 1 triggers
+            cutoff_time = timestamp - LEVEL1_FREQUENCY_WINDOW_SECONDS
+            recent_triggers = [ts for ts in self.level1_trigger_history if ts >= cutoff_time]
+            print(f"  → Level 1 alerts triggered {len(recent_triggers)} times in last {LEVEL1_FREQUENCY_WINDOW_SECONDS/60:.1f} minutes")
+            print(f"  → Threshold: ≥{LEVEL1_FREQUENCY_THRESHOLD} alerts indicates persistent fatigue")
+            print("  → Driver repeatedly becoming drowsy - Immediate attention required!")
+        else:
+            print("  → Driver unresponsive to Level 1 warnings - Immediate attention required!")
         
         # Start emergency alerts
         self.start_level2_alerts()
@@ -363,6 +518,8 @@ class AlertEngine:
             # Clear yawn tracking when reset
             self.yawn_timestamps = []
             self.yawns_since_level1 = 0
+            # Note: We keep level1_trigger_history to track frequency patterns
+            # It will be cleaned automatically by _check_frequent_level1_trigger
             print("[ALERT RESET] Driver alertness restored - symptoms cleared")
     
     def manual_reset(self):

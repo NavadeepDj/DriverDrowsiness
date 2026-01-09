@@ -186,9 +186,16 @@ def main():
                     if yaw is not None and not looking:
                         state = "INATTENTIVE"
             
-            # Process alerts based on driver state and yawn frequency (symptom-based)
+            # Process alerts based on driver state and all symptom metrics (symptom-based)
             recent_yawn_ts = recent_yawn_timestamps if face_landmarks else []
-            alerter.process(state, now, yawn_timestamps=recent_yawn_ts)
+            alerter.process(
+                state, now, 
+                yawn_timestamps=recent_yawn_ts,
+                perclos=perclos if face_landmarks else None,
+                blink_rate=blink_rate if face_landmarks else None,
+                microsleep_count=micro_count if face_landmarks else 0,
+                ear=ear if face_landmarks else None
+            )
             alert_level = alerter.get_alert_level()
             level1_elapsed = alerter.get_level1_elapsed(now)
             yawn_frequency = alerter.get_yawn_frequency(now) if face_landmarks else 0.0

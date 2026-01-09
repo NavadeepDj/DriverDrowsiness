@@ -8,7 +8,7 @@ EAR_DROWSY_THRESHOLD = 0.16
 
 # Lip Aspect Ratio (LAR) thresholds for yawn detection
 LAR_THRESHOLD = 0.65                  # LAR > threshold => mouth open (yawning) - increased for accuracy
-YAWN_DURATION_SECONDS = 1.5           # Mouth open for >= 1.5s => yawn event - increased for accuracy
+YAWN_DURATION_SECONDS = 2.0           # Mouth open for >= 2.0s => yawn event
 LAR_SMOOTHING_WINDOW = 5              # Number of frames to average LAR for smoothing (reduces noise)
 LAR_CONSECUTIVE_FRAMES = 3            # Require LAR > threshold for N consecutive frames before detecting yawn
 
@@ -69,15 +69,31 @@ LEVEL1_DURATION_SECONDS = 3  # Duration in seconds before Level 1 alert triggers
 
 # Level 1 Alert: Yawn-based trigger (Research-backed thresholds)
 # Based on driver monitoring research:
-# - 0-1 yawns/min: Normal/Alert (Low risk)
-# - 2-3 yawns/min: Unusual (Moderate risk) → Level 1 Alert
-# - ≥4 yawns/min: Strong drowsiness indicator (High risk) → Level 1 Alert
-YAWN_ALERT_WINDOW_SECONDS = 60  # Rolling 1-minute window for yawn frequency calculation
-YAWN_ALERT_THRESHOLD = 2  # Minimum yawns per minute to trigger Level 1 (≥2 yawns/min = unusual)
+# - 0-1 yawns/30s: Normal/Alert (Low risk)
+# - >2 yawns/30s: Unusual (Moderate risk) → Level 1 Alert
+YAWN_ALERT_WINDOW_SECONDS = 30  # Rolling 30-second window for yawn frequency calculation
+YAWN_ALERT_THRESHOLD = 2  # Minimum yawns in 30s to trigger Level 1 (>2 yawns/30s = unusual)
 
 # Level 2 Alert: Escalates if Level 1 persists
 LEVEL2_DURATION_SECONDS = 10  # Duration in seconds after Level 1 before Level 2 triggers
 
 # Yawn-based Level 2 escalation: Only escalate if yawns are RECENT (not just in rolling window)
 YAWN_RECENT_WINDOW_SECONDS = 20  # Check if yawns occurred in last 20 seconds for Level 2 escalation
+
+# Level 1 Alert: Additional Independent Symptom Triggers
+# Excessive Blink Rate trigger
+BLINK_RATE_LEVEL1_THRESHOLD = 30.0  # Blinks per minute to trigger Level 1 (≥30 blinks/min = excessive)
+
+# Microsleep event trigger (immediate, no delay)
+MICROSLEEP_LEVEL1_TRIGGER = True  # Microsleep triggers Level 1 immediately
+
+# PERCLOS-based trigger (independent of state)
+PERCLOS_LEVEL1_MIN = 15.0  # Minimum PERCLOS to trigger Level 1 (≥15%)
+PERCLOS_LEVEL1_MAX = 40.0  # Maximum PERCLOS for Level 1 trigger (≤40%, above goes to state-based)
+
+# Level 2 Alert: Frequent Level 1 Alerts Escalation
+# If Level 1 alerts are triggered too frequently (driver repeatedly becomes drowsy and recovers),
+# this indicates persistent fatigue and should escalate to Level 2
+LEVEL1_FREQUENCY_WINDOW_SECONDS = 300  # 5 minutes rolling window to track Level 1 frequency
+LEVEL1_FREQUENCY_THRESHOLD = 3  # If ≥3 Level 1 alerts occur within the window, escalate to Level 2
 
