@@ -1,0 +1,68 @@
+#############################
+# Python bytecode / cache  #
+#############################
+__pycache__/
+*.py[cod]
+*$py.class
+
+#############################
+# Virtual environments      #
+#############################
+venv/
+.venv/
+env/
+.env/
+
+#############################
+# Packaging / build output  #
+#############################
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+#############################
+# Test / tooling caches     #
+#############################
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+#############################
+# OS / editor junk          #
+#############################
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+#############################
+# IDE / editor configs      #
+#############################
+.vscode/
+.idea/
+*.iml
+
+#############################
+# Cursor / tooling metadata #
+#############################
+.cursor/
+.DS_Store
+
+#############################
+# Logs / runtime artifacts  #
+#############################
+logs/
+edge/logs/
+*.log
+
+#############################
+# Local data / temp files   #
+#############################
+*.tmp
+*.swp
+*.swo
