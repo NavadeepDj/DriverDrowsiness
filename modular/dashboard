@@ -184,7 +184,7 @@
                     <div class="size-8 bg-primary/20 rounded-lg flex items-center justify-center border border-primary/30">
                         <span class="material-symbols-outlined text-primary">monitoring</span>
                     </div>
-                    <h2 class="text-white text-xl font-extrabold tracking-tight">Electrifex Dashboard</h2>
+                    <h2 class="text-white text-xl font-extrabold tracking-tight">Electrifex_Dashboard</h2>
                 </div>
                 <div class="h-6 w-px bg-white/10 mx-2"></div>
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20">
